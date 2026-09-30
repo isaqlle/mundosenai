@@ -1,7 +1,8 @@
-"""Sistema de Gestão e Telemetria de Robôs Industriais - Mundo SENAI."""
+"""Mundo SENAI — Fábrica Inteligente.
+Demonstração educacional de software, controle e dados para uma célula robótica.
+"""
 from __future__ import annotations
 
-import io
 import random
 import sqlite3
 import time
@@ -10,427 +11,525 @@ from pathlib import Path
 
 import pandas as pd
 import plotly.express as px
-import qrcode
 import streamlit as st
 
-st.set_page_config(page_title="Mundo SENAI | Gestão de Robôs", page_icon="🤖", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(
+    page_title="Mundo SENAI | Fábrica Inteligente",
+    page_icon="🤖",
+    layout="wide",
+    initial_sidebar_state="collapsed",
+)
+
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "robotica_senai.db"
-ROBOTS = ["ROBÔ-01", "ROBÔ-02", "ROBÔ-03", "ROBÔ-04", "ROBÔ-05", "ROBÔ-06"]
+ROBOTS = [f"ROBÔ-{i:02d}" for i in range(1, 7)]
+STATIONS = {
+    "1": "Controle da Produção",
+    "2": "Controle dos Robôs",
+    "3": "Central de Dados",
+    "4": "Fábrica — Visão Geral",
+}
 
-st.markdown("""
+st.markdown(
+    """
 <style>
-.main { background:#f6f8fb; }
-.block-container { max-width:1500px; padding-top:1.2rem; padding-bottom:2rem; }
-.hero { padding:1.2rem 1.4rem; border-radius:18px; background:linear-gradient(135deg,#111827,#1f2937); color:white; margin-bottom:1rem; }
-.hero h1 { margin-bottom:.2rem; }
-.hero p { color:#d1d5db; margin-bottom:0; }
-.station { border-left:5px solid #2563eb; padding:.8rem 1rem; background:white; border-radius:10px; margin-bottom:1rem; }
-div[data-testid="stMetric"] { background:white; padding:.8rem; border-radius:12px; border:1px solid #e5e7eb; }
+:root {
+  --bg:#07111f; --panel:#0e1a2b; --panel2:#132238; --line:#263850;
+  --text:#f8fafc; --muted:#aebdd0; --blue:#60a5fa; --green:#34d399;
+  --yellow:#fbbf24; --red:#fb7185;
+}
+.stApp { background:var(--bg); color:var(--text); }
+.block-container { max-width:1600px; padding:1rem 1.8rem 2rem; }
+[data-testid="stHeader"] { background:transparent; }
+[data-testid="stToolbar"] { visibility:hidden; }
+section[data-testid="stSidebar"] { background:#08101d; }
+section[data-testid="stSidebar"] * { color:var(--text); }
+.factory-top {
+  display:flex; justify-content:space-between; align-items:center; gap:1rem;
+  padding:.8rem 1rem; margin-bottom:.8rem; border-bottom:1px solid var(--line);
+}
+.brand { color:#fff; font-weight:800; letter-spacing:.02em; font-size:1.05rem; }
+.brand span { color:#8ea6c4; font-weight:500; }
+.clock { color:#8ea6c4; font-size:.85rem; }
+.title { margin:.3rem 0 .25rem; color:#fff; font-size:clamp(1.8rem,3vw,2.7rem); font-weight:850; }
+.subtitle { color:var(--muted); margin:0 0 1.1rem; font-size:1rem; }
+.panel {
+  background:linear-gradient(180deg,var(--panel),#0b1727); border:1px solid var(--line);
+  border-radius:16px; padding:1rem; height:100%; box-shadow:0 10px 30px rgba(0,0,0,.12);
+}
+.panel h3 { color:#fff; margin:.1rem 0 .55rem; }
+.panel p { color:var(--muted); }
+.kpi {
+  background:var(--panel); border:1px solid var(--line); border-radius:14px;
+  padding:.9rem 1rem; min-height:92px;
+}
+.kpi-label { color:#8fa2bb; font-size:.78rem; text-transform:uppercase; letter-spacing:.08em; }
+.kpi-value { color:#fff; font-size:1.65rem; font-weight:850; margin-top:.2rem; }
+.kpi-note { color:#8fa2bb; font-size:.78rem; margin-top:.15rem; }
+.robot-card { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:.9rem; }
+.robot-name { color:#fff; font-weight:800; font-size:1.05rem; }
+.robot-meta { color:var(--muted); font-size:.85rem; }
+.dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; }
+.dot-ok { background:var(--green); } .dot-warn { background:var(--yellow); } .dot-err { background:var(--red); }
+.event {
+  background:#0b1e1a; border:1px solid #1c5948; border-radius:14px; padding:.8rem 1rem;
+}
+.event-label { color:#7ee7c1; font-size:.73rem; text-transform:uppercase; letter-spacing:.1em; }
+.event-main { color:#fff; font-size:1.15rem; font-weight:800; margin-top:.15rem; }
+.event-sub { color:#9cc9bb; font-size:.8rem; margin-top:.15rem; }
+.helper { color:#8fa2bb; font-size:.82rem; margin-top:.25rem; }
+[data-testid="stMetric"] { background:var(--panel)!important; border:1px solid var(--line)!important; border-radius:14px!important; }
+[data-testid="stMetricLabel"] { color:#aebdd0!important; }
+[data-testid="stMetricValue"] { color:#fff!important; }
+.stDataFrame { border:1px solid var(--line); border-radius:12px; overflow:hidden; }
+button[kind="primary"] { min-height:3rem; }
 </style>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
 
-def get_connection() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+def db() -> sqlite3.Connection:
+    conn = sqlite3.connect(DB_PATH, timeout=10, check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout=5000")
     return conn
 
 
 def init_database() -> None:
-    """Cria as tabelas e os dados iniciais da demonstração."""
-    conn = get_connection()
+    conn = db()
     cur = conn.cursor()
-    cur.execute("""
+    cur.execute("PRAGMA journal_mode=WAL")
+    cur.executescript(
+        """
         CREATE TABLE IF NOT EXISTS robots (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT UNIQUE NOT NULL, status TEXT NOT NULL,
-            battery REAL NOT NULL, temperature REAL NOT NULL, speed REAL NOT NULL,
-            position_x REAL NOT NULL, position_y REAL NOT NULL, updated_at TEXT NOT NULL
-        )
-    """)
-    cur.execute("""
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT UNIQUE NOT NULL,
+          status TEXT NOT NULL,
+          battery REAL NOT NULL,
+          temperature REAL NOT NULL,
+          speed REAL NOT NULL,
+          position_x REAL NOT NULL,
+          position_y REAL NOT NULL,
+          updated_at TEXT NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS telemetry (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            robot_name TEXT NOT NULL, battery REAL NOT NULL, temperature REAL NOT NULL,
-            speed REAL NOT NULL, position_x REAL NOT NULL, position_y REAL NOT NULL,
-            status TEXT NOT NULL, event_type TEXT NOT NULL, message TEXT NOT NULL,
-            created_at TEXT NOT NULL
-        )
-    """)
-    cur.execute("""
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          robot_name TEXT NOT NULL,
+          battery REAL NOT NULL,
+          temperature REAL NOT NULL,
+          speed REAL NOT NULL,
+          position_x REAL NOT NULL,
+          position_y REAL NOT NULL,
+          status TEXT NOT NULL,
+          event_type TEXT NOT NULL,
+          message TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS commands (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            robot_name TEXT NOT NULL, command TEXT NOT NULL, parameter REAL,
-            result TEXT NOT NULL, created_at TEXT NOT NULL
-        )
-    """)
-    cur.execute("""
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          robot_name TEXT NOT NULL,
+          command TEXT NOT NULL,
+          parameter REAL,
+          result TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS maintenance (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            robot_name TEXT NOT NULL, priority TEXT NOT NULL, title TEXT NOT NULL,
-            status TEXT NOT NULL, assignee TEXT NOT NULL, created_at TEXT NOT NULL
-        )
-    """)
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          robot_name TEXT NOT NULL,
+          priority TEXT NOT NULL,
+          title TEXT NOT NULL,
+          status TEXT NOT NULL,
+          assignee TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS system_state (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL
+        );
+        """
+    )
     if cur.execute("SELECT COUNT(*) FROM robots").fetchone()[0] == 0:
         now = datetime.now().isoformat(timespec="seconds")
         for i, robot in enumerate(ROBOTS):
-            cur.execute("""
-                INSERT INTO robots(name,status,battery,temperature,speed,position_x,position_y,updated_at)
-                VALUES(?,?,?,?,?,?,?,?)
-            """, (robot, "Ativo" if i < 5 else "Manutenção", random.uniform(55,100),
-                   random.uniform(35,55), random.uniform(0,1.5), random.uniform(0,10),
-                   random.uniform(0,10), now))
+            status = "Ativo" if i != 5 else "Manutenção"
+            cur.execute(
+                """INSERT INTO robots
+                (name,status,battery,temperature,speed,position_x,position_y,updated_at)
+                VALUES(?,?,?,?,?,?,?,?)""",
+                (
+                    robot, status, random.uniform(72, 99), random.uniform(35, 48),
+                    random.uniform(.2, 1.4) if status == "Ativo" else 0,
+                    random.uniform(1, 9), random.uniform(1, 9), now,
+                ),
+            )
     if cur.execute("SELECT COUNT(*) FROM maintenance").fetchone()[0] == 0:
         tasks = [
-            ("ROBÔ-02","Alta","Calibrar sensor de posição","Em andamento","Ana"),
-            ("ROBÔ-05","Média","Inspeção preventiva","Aberto","Carlos"),
-            ("ROBÔ-01","Baixa","Atualizar rotina de movimentação","Concluído","João"),
-            ("ROBÔ-04","Alta","Verificar temperatura do motor","Aberto","Marina"),
+            ("ROBÔ-06", "Alta", "Inspeção do módulo de movimento", "Em andamento", "Equipe A"),
+            ("ROBÔ-02", "Média", "Calibração do sensor de posição", "Aberto", "Equipe B"),
+            ("ROBÔ-04", "Baixa", "Atualização da rotina de movimentação", "Aberto", "Equipe C"),
+            ("ROBÔ-01", "Baixa", "Checklist de partida", "Concluído", "Equipe A"),
         ]
-        for robot, priority, title, status, assignee in tasks:
-            cur.execute("""
-                INSERT INTO maintenance(robot_name,priority,title,status,assignee,created_at)
-                VALUES(?,?,?,?,?,?)
-            """, (robot, priority, title, status, assignee, datetime.now().isoformat(timespec="seconds")))
-    conn.commit()
-    conn.close()
+        for task in tasks:
+            cur.execute(
+                "INSERT INTO maintenance(robot_name,priority,title,status,assignee,created_at) VALUES(?,?,?,?,?,?)",
+                (*task, datetime.now().isoformat(timespec="seconds")),
+            )
+    cur.execute("INSERT OR IGNORE INTO system_state(key,value) VALUES('last_tick','0')")
+    conn.commit(); conn.close()
 
 
-def read_dataframe(query: str, params: tuple = ()) -> pd.DataFrame:
-    conn = get_connection()
-    df = pd.read_sql_query(query, conn, params=params)
-    conn.close()
-    return df
+def query_df(sql: str, params: tuple = ()) -> pd.DataFrame:
+    conn = db()
+    try:
+        return pd.read_sql_query(sql, conn, params=params)
+    finally:
+        conn.close()
 
 
-def generate_telemetry() -> None:
-    """Gera uma nova leitura simulada para cada robô e persiste no SQLite."""
-    conn = get_connection()
-    cur = conn.cursor()
-    now = datetime.now().isoformat(timespec="seconds")
-    rows = cur.execute("SELECT name,status,battery,temperature,speed,position_x,position_y FROM robots").fetchall()
-    for row in rows:
-        if row["status"] == "Manutenção":
-            speed = 0.0
-            battery = max(0, row["battery"] - random.uniform(0.00,0.08))
-            temperature = max(25, row["temperature"] + random.uniform(-0.4,0.8))
-            x, y = row["position_x"], row["position_y"]
-            event_type, message = "MANUTENÇÃO", "Robô em manutenção preventiva."
-        else:
-            speed = min(2.0, max(0, row["speed"] + random.uniform(-0.25,0.25)))
-            battery = max(0, row["battery"] - random.uniform(0.02,0.15))
-            temperature = min(85, max(25, row["temperature"] + random.uniform(-1.5,1.5)))
-            x = min(10, max(0, row["position_x"] + random.uniform(-0.6,0.6)))
-            y = min(10, max(0, row["position_y"] + random.uniform(-0.6,0.6)))
-            event_type, message = "TELEMETRIA", "Leitura periódica recebida."
-            if battery < 15:
-                battery = random.uniform(70,100)
-                event_type, message = "RECARGA", "Ciclo de recarga simulado concluído."
-        cur.execute("""
-            UPDATE robots SET battery=?,temperature=?,speed=?,position_x=?,position_y=?,updated_at=? WHERE name=?
-        """, (battery,temperature,speed,x,y,now,row["name"]))
-        cur.execute("""
-            INSERT INTO telemetry(robot_name,battery,temperature,speed,position_x,position_y,status,event_type,message,created_at)
-            VALUES(?,?,?,?,?,?,?,?,?,?)
-        """, (row["name"],battery,temperature,speed,x,y,row["status"],event_type,message,now))
-    conn.commit()
-    conn.close()
+def tick_telemetry(interval: float = 2.0) -> bool:
+    conn = db()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute("SELECT value FROM system_state WHERE key='last_tick'").fetchone()
+        last = float(row["value"] if row else 0)
+        now_epoch = time.time()
+        if now_epoch - last < interval:
+            conn.rollback(); return False
+        now = datetime.now().isoformat(timespec="seconds")
+        rows = conn.execute("SELECT * FROM robots").fetchall()
+        for r in rows:
+            if r["status"] == "Manutenção":
+                speed = 0
+                battery = max(0, r["battery"] - random.uniform(0, .03))
+                temp = max(25, r["temperature"] + random.uniform(-.25, .4))
+                x, y = r["position_x"], r["position_y"]
+                event, msg = "MANUTENÇÃO", "Monitoramento do equipamento."
+            else:
+                speed = min(2.0, max(0, r["speed"] + random.uniform(-.18, .18)))
+                battery = max(0, r["battery"] - random.uniform(.01, .06))
+                temp = min(80, max(25, r["temperature"] + random.uniform(-.7, .7)))
+                x = min(9.5, max(.5, r["position_x"] + random.uniform(-.35, .35)))
+                y = min(9.5, max(.5, r["position_y"] + random.uniform(-.35, .35)))
+                event, msg = "TELEMETRIA", "Leitura operacional recebida."
+                if battery < 15:
+                    battery = 100; event, msg = "RECARGA", "Ciclo de recarga concluído."
+            conn.execute(
+                "UPDATE robots SET battery=?,temperature=?,speed=?,position_x=?,position_y=?,updated_at=? WHERE name=?",
+                (battery, temp, speed, x, y, now, r["name"]),
+            )
+            conn.execute(
+                """INSERT INTO telemetry
+                (robot_name,battery,temperature,speed,position_x,position_y,status,event_type,message,created_at)
+                VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                (r["name"], battery, temp, speed, x, y, r["status"], event, msg, now),
+            )
+        conn.execute("UPDATE system_state SET value=? WHERE key='last_tick'", (str(now_epoch),))
+        conn.commit(); return True
+    except sqlite3.OperationalError:
+        conn.rollback(); return False
+    finally:
+        conn.close()
 
 
 def send_command(robot: str, command: str, parameter: float | None = None) -> str:
-    """Simula um comando e grava sua auditoria no banco."""
-    conn = get_connection()
-    cur = conn.cursor()
-    robot_row = cur.execute("SELECT status FROM robots WHERE name=?", (robot,)).fetchone()
-    if not robot_row:
-        result = "ERRO: robô não encontrado."
-    elif robot_row["status"] == "Manutenção" and command != "Diagnóstico":
-        result = "BLOQUEADO: robô está em manutenção."
-    else:
-        result = "OK: comando processado pelo simulador."
-        if command == "Parar":
-            cur.execute("UPDATE robots SET speed=0 WHERE name=?", (robot,))
-        elif command == "Mover":
-            cur.execute("UPDATE robots SET speed=? WHERE name=?", (max(0,min(2,parameter or 0)),robot))
-        elif command == "Calibrar":
-            cur.execute("UPDATE robots SET position_x=5,position_y=5,temperature=40 WHERE name=?", (robot,))
-        elif command == "Recarregar":
-            cur.execute("UPDATE robots SET battery=100 WHERE name=?", (robot,))
-    now = datetime.now().isoformat(timespec="seconds")
-    cur.execute("INSERT INTO commands(robot_name,command,parameter,result,created_at) VALUES(?,?,?,?,?)",
-                (robot,command,parameter,result,now))
-    cur.execute("""
-        INSERT INTO telemetry(robot_name,battery,temperature,speed,position_x,position_y,status,event_type,message,created_at)
-        SELECT name,battery,temperature,speed,position_x,position_y,status,'COMANDO',?,? FROM robots WHERE name=?
-    """, (f"{command} executado: {result}",now,robot))
-    conn.commit()
-    conn.close()
-    return result
+    conn = db()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        r = conn.execute("SELECT * FROM robots WHERE name=?", (robot,)).fetchone()
+        if not r:
+            result = "Robô não encontrado."
+        elif r["status"] == "Manutenção" and command != "Diagnóstico":
+            result = "Comando bloqueado: equipamento em manutenção."
+        else:
+            result = "Comando executado."
+            if command == "Mover":
+                conn.execute("UPDATE robots SET speed=? WHERE name=?", (max(0, min(2, parameter or 0)), robot))
+            elif command == "Parar":
+                conn.execute("UPDATE robots SET speed=0 WHERE name=?", (robot,))
+            elif command == "Calibrar":
+                conn.execute("UPDATE robots SET position_x=5,position_y=5,temperature=40 WHERE name=?", (robot,))
+            elif command == "Recarregar":
+                conn.execute("UPDATE robots SET battery=100 WHERE name=?", (robot,))
+        now = datetime.now().isoformat(timespec="seconds")
+        conn.execute(
+            "INSERT INTO commands(robot_name,command,parameter,result,created_at) VALUES(?,?,?,?,?)",
+            (robot, command, parameter, result, now),
+        )
+        conn.execute(
+            """INSERT INTO telemetry
+            (robot_name,battery,temperature,speed,position_x,position_y,status,event_type,message,created_at)
+            SELECT name,battery,temperature,speed,position_x,position_y,status,'COMANDO',?,? FROM robots WHERE name=?""",
+            (f"{command}: {result}", now, robot),
+        )
+        conn.commit(); return result
+    except Exception:
+        conn.rollback(); raise
+    finally:
+        conn.close()
 
 
-def create_qr_code(url: str) -> bytes:
-    qr = qrcode.QRCode(version=None, error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=10, border=4)
-    qr.add_data(url)
-    qr.make(fit=True)
-    image = qr.make_image(fill_color="black", back_color="white")
-    buffer = io.BytesIO()
-    image.save(buffer, format="PNG")
-    return buffer.getvalue()
+def robots_df() -> pd.DataFrame:
+    return query_df(
+        """SELECT name AS Robô,status AS Status,ROUND(battery,1) AS Bateria,
+        ROUND(temperature,1) AS Temperatura,ROUND(speed,2) AS Velocidade,
+        ROUND(position_x,2) AS X,ROUND(position_y,2) AS Y,updated_at AS Atualizado
+        FROM robots ORDER BY name"""
+    )
 
 
-def get_robot_status() -> pd.DataFrame:
-    return read_dataframe("""
-        SELECT name AS Robô,status AS Status,ROUND(battery,1) AS Bateria,
-               ROUND(temperature,1) AS Temperatura,ROUND(speed,2) AS Velocidade,
-               ROUND(position_x,2) AS X,ROUND(position_y,2) AS Y,updated_at AS Atualizado
-        FROM robots ORDER BY name
-    """)
+def latest_event() -> pd.DataFrame:
+    return query_df(
+        """SELECT robot_name AS Robô, command AS Comando, result AS Resultado, created_at AS DataHora
+        FROM commands ORDER BY id DESC LIMIT 1"""
+    )
 
 
-def get_telemetry(limit: int = 200) -> pd.DataFrame:
-    return read_dataframe("""
-        SELECT id AS ID,robot_name AS Robô,ROUND(battery,1) AS Bateria,
-               ROUND(temperature,1) AS Temperatura,ROUND(speed,2) AS Velocidade,
-               ROUND(position_x,2) AS X,ROUND(position_y,2) AS Y,status AS Status,
-               event_type AS Evento,message AS Mensagem,created_at AS DataHora
-        FROM telemetry ORDER BY id DESC LIMIT ?
-    """, (limit,))
+def page_header(title: str, subtitle: str) -> None:
+    st.markdown(f'<div class="title">{title}</div><div class="subtitle">{subtitle}</div>', unsafe_allow_html=True)
 
 
-init_database()
-if "last_update" not in st.session_state:
-    st.session_state.last_update = 0.0
-if time.time() - st.session_state.last_update >= 2:
-    generate_telemetry()
-    st.session_state.last_update = time.time()
+def kpi_row(items: list[tuple[str, str, str]]) -> None:
+    cols = st.columns(len(items))
+    for col, (label, value, note) in zip(cols, items):
+        with col:
+            st.markdown(
+                f'<div class="kpi"><div class="kpi-label">{label}</div>'
+                f'<div class="kpi-value">{value}</div><div class="kpi-note">{note}</div></div>',
+                unsafe_allow_html=True,
+            )
 
-st.markdown("""
-<div class="hero">
-<h1>🤖 Sistema de Gestão e Telemetria de Robôs Industriais</h1>
-<p>Mundo SENAI • Fábrica de Software & Robótica • Demonstração educacional</p>
-</div>
-""", unsafe_allow_html=True)
 
-with st.sidebar:
-    st.header("🏭 Estações da Fábrica")
-    station = st.radio("Selecione a estação", [
-        "1 — Gestão e Requisitos", "2 — Código e Controle",
-        "3 — Banco de Dados e Logs", "4 — Dashboard Executivo",
-    ])
-    st.divider()
-    st.caption("Simulação local")
-    st.caption(f"Banco: `{DB_PATH.name}`")
-    if st.button("🔄 Atualizar telemetria", use_container_width=True):
-        generate_telemetry()
-        st.rerun()
-
-if station.startswith("1"):
-    st.markdown('<div class="station"><h2>📋 Estação 1 — Gestão e Requisitos</h2><p>Visão do Product Owner / Analista de Sistemas.</p></div>', unsafe_allow_html=True)
-    robots_df = get_robot_status()
-    maintenance_df = read_dataframe("""
-        SELECT robot_name AS Robô,priority AS Prioridade,title AS Tarefa,status AS Status,
-               assignee AS Responsável,created_at AS CriadoEm FROM maintenance
-        ORDER BY CASE priority WHEN 'Alta' THEN 1 WHEN 'Média' THEN 2 ELSE 3 END,id DESC
-    """)
-    active = int((robots_df["Status"] == "Ativo").sum())
-    maintenance = int((robots_df["Status"] == "Manutenção").sum())
-    open_tasks = int(maintenance_df["Status"].isin(["Aberto","Em andamento"]).sum())
-    c1,c2,c3,c4 = st.columns(4)
-    c1.metric("Robôs ativos",active); c2.metric("Em manutenção",maintenance); c3.metric("Tarefas abertas",open_tasks); c4.metric("Integração","ONLINE")
-    st.subheader("Quadro de trabalho")
-    col1,col2 = st.columns([1.3,1])
-    with col1: st.dataframe(maintenance_df,use_container_width=True,hide_index=True)
-    with col2:
-        st.markdown("### Status da integração")
-        st.success("🟢 API de telemetria — conectada (simulada)")
-        st.success("🟢 SQLite — conectado")
-        st.success("🟢 Painel Streamlit — operacional")
-        st.info("🔵 Robôs físicos — não necessários para a demonstração")
-    st.subheader("Requisitos demonstrados")
-    req = pd.DataFrame([
-        ["REQ-001","Visualizar status da frota","Concluído"], ["REQ-002","Receber telemetria","Concluído"],
-        ["REQ-003","Enviar comando ao robô","Concluído"], ["REQ-004","Registrar logs no banco","Concluído"],
-        ["REQ-005","Exibir indicadores executivos","Concluído"], ["REQ-006","Gerar QR Code do sistema","Concluído"]],
-        columns=["ID","Requisito","Situação"])
-    st.dataframe(req,use_container_width=True,hide_index=True)
-    st.subheader("Frota atual")
-    st.dataframe(robots_df,use_container_width=True,hide_index=True)
-
-elif station.startswith("2"):
+def live_status() -> None:
+    df = robots_df()
+    active = int((df["Status"] == "Ativo").sum())
+    maintenance = int((df["Status"] == "Manutenção").sum())
+    commands = int(query_df("SELECT COUNT(*) AS n FROM commands").iloc[0]["n"])
     st.markdown(
-        '<div class="station"><h2>💻 Estação 2 — Código e Controle Operacional</h2>'
-        '<p>Visão do desenvolvedor/programador — com demonstração interativa da lógica.</p></div>',
+        f'<div class="factory-top"><div class="brand">MUNDO SENAI <span>• Fábrica Inteligente</span></div>'
+        f'<div class="clock">{active} em operação &nbsp;•&nbsp; {maintenance} em manutenção &nbsp;•&nbsp; {commands} comandos</div></div>',
         unsafe_allow_html=True,
     )
 
-    robots_df = get_robot_status()
-    left, right = st.columns([1, 1.35])
 
+@st.fragment(run_every="2s")
+def refresh_state() -> None:
+    tick_telemetry()
+    live_status()
+
+
+@st.fragment(run_every="2s")
+def station_production() -> None:
+    df = robots_df()
+    maint = query_df(
+        """SELECT robot_name AS Robô,priority AS Prioridade,title AS Tarefa,status AS Status,assignee AS Responsável
+        FROM maintenance ORDER BY CASE priority WHEN 'Alta' THEN 1 WHEN 'Média' THEN 2 ELSE 3 END, id DESC"""
+    )
+    active = int((df["Status"] == "Ativo").sum())
+    open_tasks = int(maint["Status"].isin(["Aberto", "Em andamento"]).sum())
+    low_battery = int((df["Bateria"] < 25).sum())
+    kpi_row([
+        ("Produção", "Operação", f"{active} robôs ativos"),
+        ("Tarefas abertas", str(open_tasks), "manutenção e melhoria"),
+        ("Alertas", str(low_battery), "bateria abaixo de 25%"),
+        ("Frota", str(len(df)), "equipamentos monitorados"),
+    ])
+    st.write("")
+    a, b = st.columns([1.3, .9])
+    with a:
+        st.markdown('<div class="panel"><h3>Ordens de trabalho</h3>', unsafe_allow_html=True)
+        st.dataframe(maint, width="stretch", hide_index=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+    with b:
+        st.markdown('<div class="panel"><h3>Status da frota</h3>', unsafe_allow_html=True)
+        for _, r in df.iterrows():
+            dot = "dot-ok" if r["Status"] == "Ativo" else "dot-warn"
+            st.markdown(
+                f'<div class="robot-card" style="margin:.45rem 0"><div class="robot-name">'
+                f'<span class="dot {dot}"></span>{r["Robô"]}</div>'
+                f'<div class="robot-meta">{r["Status"]} &nbsp;•&nbsp; {r["Bateria"]}% bateria &nbsp;•&nbsp; {r["Temperatura"]} °C</div></div>',
+                unsafe_allow_html=True,
+            )
+        st.markdown('</div>', unsafe_allow_html=True)
+
+
+@st.fragment(run_every="2s")
+def station_robots() -> None:
+    df = robots_df()
+    page_header("Controle dos Robôs", "Operação da célula robótica")
+    left, right = st.columns([.82, 1.18])
     with left:
-        st.subheader("🎮 Controle do robô")
-        selected_robot = st.selectbox("Robô", ROBOTS)
-        command = st.selectbox(
-            "Comando",
-            ["Mover", "Parar", "Calibrar", "Recarregar", "Diagnóstico"],
-        )
-
+        st.markdown('<div class="panel"><h3>Comando</h3><p>Escolha o equipamento e execute uma operação.</p>', unsafe_allow_html=True)
+        robot = st.selectbox("Robô", ROBOTS, key="robot_select")
+        command = st.radio("Operação", ["Mover", "Parar", "Calibrar", "Recarregar", "Diagnóstico"], horizontal=True, key="command_select")
         parameter = None
         if command == "Mover":
-            parameter = st.slider(
-                "Velocidade (m/s)", 0.0, 2.0, 0.8, 0.1
-            )
-
-        if st.button(
-            "🚀 Enviar comando ao robô",
-            type="primary",
-            use_container_width=True,
-        ):
-            result = send_command(selected_robot, command, parameter)
-            if result.startswith("OK"):
+            parameter = st.slider("Velocidade", 0.0, 2.0, .8, .1, key="speed_select")
+        if st.button("EXECUTAR OPERAÇÃO", type="primary", width="stretch"):
+            result = send_command(robot, command, parameter)
+            if result == "Comando executado.":
                 st.success(result)
-            elif result.startswith("BLOQUEADO"):
-                st.warning(result)
             else:
-                st.error(result)
-
-        robot_row = robots_df[robots_df["Robô"] == selected_robot]
-        if not robot_row.empty:
-            row = robot_row.iloc[0]
-            st.markdown("### Estado atual")
-            a, b, c = st.columns(3)
-            a.metric("Bateria", f"{row['Bateria']}%")
-            b.metric("Temperatura", f"{row['Temperatura']} °C")
-            c.metric("Velocidade", f"{row['Velocidade']} m/s")
-
-        st.info(
-            "💡 Escolha uma ação, envie o comando e observe a relação "
-            "entre interface, lógica, banco e telemetria."
-        )
-
+                st.warning(result)
+        selected = df[df["Robô"] == robot]
+        if not selected.empty:
+            r = selected.iloc[0]
+            st.markdown('<h3 style="margin-top:1rem">Estado atual</h3>', unsafe_allow_html=True)
+            x, y, z = st.columns(3)
+            x.metric("Bateria", f"{r['Bateria']}%")
+            y.metric("Temperatura", f"{r['Temperatura']} °C")
+            z.metric("Velocidade", f"{r['Velocidade']} m/s")
+        st.markdown('</div>', unsafe_allow_html=True)
     with right:
-        st.subheader("🧠 Código interativo")
-
-        parameter_code = (
-            f"parametro = {parameter:.1f}"
-            if parameter is not None
-            else "parametro = None"
-        )
-
-        generated_code = (
-            '# Entrada feita pelo aluno na interface\n'
-            f'robo = "{selected_robot}"\n'
-            f'comando = "{command}"\n'
-            f'{parameter_code}\n\n'
-            'def processar_comando(robo, comando, parametro=None):\n'
-            '    if robo.status == "Manutenção":\n'
-            '        return "BLOQUEADO"\n\n'
-            '    if comando == "Mover":\n'
-            '        robo.velocidade = parametro\n'
-            '    elif comando == "Parar":\n'
-            '        robo.velocidade = 0\n'
-            '    elif comando == "Calibrar":\n'
-            '        robo.posicao = (5, 5)\n'
-            '    elif comando == "Recarregar":\n'
-            '        robo.bateria = 100\n'
-            '    elif comando == "Diagnóstico":\n'
-            '        return consultar_diagnostico(robo)\n\n'
-            '    salvar_log(robo, comando)\n'
-            '    return "OK"\n'
-        )
-
-        st.code(generated_code, language="python")
-        st.caption(
-            "Altere o robô, o comando ou a velocidade no painel ao lado. "
-            "O trecho exibido acompanha as escolhas automaticamente."
-        )
-
-        st.markdown("### 🔍 Fluxo da execução")
-        flow = pd.DataFrame(
-            [
-                ["1", "Interface", f"{selected_robot} + {command}", "Entrada"],
-                ["2", "Validação", "Robô está disponível?", "Regra"],
-                ["3", "Controle", f"Executa {command}", "Processamento"],
-                ["4", "Persistência", "Grava no SQLite", "Log"],
-                ["5", "Dashboard", "Atualiza telemetria", "Saída"],
-            ],
-            columns=["Etapa", "Camada", "Ação", "Tipo"],
-        )
-        st.dataframe(flow, use_container_width=True, hide_index=True)
-
-    st.subheader("🧪 Últimos comandos executados")
-    commands_df = read_dataframe(
-        "SELECT id AS ID, robot_name AS Robô, command AS Comando, "
-        "parameter AS Parâmetro, result AS Resultado, created_at AS DataHora "
-        "FROM commands ORDER BY id DESC LIMIT 15"
+        st.markdown('<div class="panel"><h3>Último comando</h3>', unsafe_allow_html=True)
+        ev = latest_event()
+        if ev.empty:
+            st.info("Nenhuma operação registrada ainda.")
+        else:
+            r = ev.iloc[0]
+            st.markdown(
+                f'<div class="event"><div class="event-label">Execução registrada</div>'
+                f'<div class="event-main">{r["Robô"]} → {r["Comando"]}</div>'
+                f'<div class="event-sub">{r["Resultado"]} • {r["DataHora"]}</div></div>',
+                unsafe_allow_html=True,
+            )
+        with st.expander("Ver lógica utilizada"):
+            param_text = f"parametro = {parameter:.1f}" if parameter is not None else "parametro = None"
+            st.code(
+                f'robo = "{robot}"\ncomando = "{command}"\n{param_text}\n\n'
+                'if robo.status == "Manutenção" and comando != "Diagnóstico":\n'
+                '    return "BLOQUEADO"\n\n'
+                'if comando == "Mover":\n'
+                '    robo.velocidade = parametro\n'
+                'elif comando == "Parar":\n'
+                '    robo.velocidade = 0\n'
+                'elif comando == "Calibrar":\n'
+                '    robo.posicao = (5, 5)\n'
+                'elif comando == "Recarregar":\n'
+                '    robo.bateria = 100\n\n'
+                'registrar_evento(robo, comando)', language="python"
+            )
+        st.markdown('<div class="helper">As operações são simuladas e registradas no SQLite.</div>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+    st.write("")
+    st.markdown('<div class="panel"><h3>Histórico recente</h3>', unsafe_allow_html=True)
+    cmds = query_df(
+        """SELECT robot_name AS Robô,command AS Operação,parameter AS Parâmetro,result AS Resultado,created_at AS DataHora
+        FROM commands ORDER BY id DESC LIMIT 8"""
     )
-    st.dataframe(commands_df, use_container_width=True, hide_index=True)
+    st.dataframe(cmds, width="stretch", hide_index=True)
+    st.markdown('</div>', unsafe_allow_html=True)
 
-    with st.expander("🎓 Roteiro do aluno"):
+
+@st.fragment(run_every="2s")
+def station_data() -> None:
+    page_header("Central de Dados", "Telemetria, eventos e histórico operacional")
+    telem = query_df(
+        """SELECT id AS ID,robot_name AS Robô,ROUND(battery,1) AS Bateria,
+        ROUND(temperature,1) AS Temperatura,ROUND(speed,2) AS Velocidade,
+        event_type AS Evento,message AS EventoDetalhe,created_at AS DataHora
+        FROM telemetry ORDER BY id DESC LIMIT 250"""
+    )
+    avg_bat = telem["Bateria"].mean() if not telem.empty else 0
+    avg_temp = telem["Temperatura"].mean() if not telem.empty else 0
+    commands = int(query_df("SELECT COUNT(*) AS n FROM commands").iloc[0]["n"])
+    kpi_row([
+        ("Registros", f"{len(telem)}", "telemetria disponível"),
+        ("Bateria média", f"{avg_bat:.1f}%", "últimas leituras"),
+        ("Temperatura média", f"{avg_temp:.1f} °C", "últimas leituras"),
+        ("Comandos", str(commands), "operações registradas"),
+    ])
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown('<div class="panel"><h3>Temperatura</h3>', unsafe_allow_html=True)
+        if not telem.empty:
+            fig = px.line(telem.sort_values("DataHora"), x="DataHora", y="Temperatura", color="Robô")
+            fig.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", margin=dict(l=10,r=10,t=20,b=10), legend_title_text="")
+            st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
+        st.markdown('</div>', unsafe_allow_html=True)
+    with c2:
+        st.markdown('<div class="panel"><h3>Bateria</h3>', unsafe_allow_html=True)
+        if not telem.empty:
+            fig = px.line(telem.sort_values("DataHora"), x="DataHora", y="Bateria", color="Robô")
+            fig.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", margin=dict(l=10,r=10,t=20,b=10), legend_title_text="")
+            st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
+        st.markdown('</div>', unsafe_allow_html=True)
+    st.write("")
+    st.markdown('<div class="panel"><h3>Eventos recentes</h3>', unsafe_allow_html=True)
+    st.dataframe(telem.head(35), width="stretch", hide_index=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+    with st.expander("Detalhes técnicos"):
+        st.code("SELECT robot_name, battery, temperature, speed, status, created_at\nFROM telemetry\nORDER BY created_at DESC\nLIMIT 100;", language="sql")
+
+
+@st.fragment(run_every="2s")
+def station_dashboard() -> None:
+    page_header("Fábrica — Visão Geral", "Estado atual da operação")
+    df = robots_df()
+    total = len(df)
+    active = int((df["Status"] == "Ativo").sum())
+    availability = active / total * 100 if total else 0
+    avg_bat = df["Bateria"].mean() if not df.empty else 0
+    avg_temp = df["Temperatura"].mean() if not df.empty else 0
+    kpi_row([
+        ("Disponibilidade", f"{availability:.0f}%", "estado atual da frota"),
+        ("Bateria média", f"{avg_bat:.1f}%", "frota monitorada"),
+        ("Temperatura média", f"{avg_temp:.1f} °C", "frota monitorada"),
+        ("Equipamentos", str(total), "na célula"),
+    ])
+    st.write("")
+    left, right = st.columns([1.15, .85])
+    with left:
+        st.markdown('<div class="panel"><h3>Mapa operacional</h3>', unsafe_allow_html=True)
+        m = df.rename(columns={"X":"x", "Y":"y", "Robô":"robot"})
+        fig = px.scatter(m, x="x", y="y", color="Status", text="robot", size="Bateria", range_x=[0,10], range_y=[0,10])
+        fig.update_traces(textposition="top center")
+        fig.update_xaxes(title="Célula X", showgrid=True, dtick=1)
+        fig.update_yaxes(title="Célula Y", showgrid=True, dtick=1)
+        fig.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(7,17,31,1)", margin=dict(l=10,r=10,t=10,b=10), legend_title_text="")
+        st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
+        st.markdown('</div>', unsafe_allow_html=True)
+    with right:
+        st.markdown('<div class="panel"><h3>Frota</h3>', unsafe_allow_html=True)
+        for _, r in df.iterrows():
+            dot = "dot-ok" if r["Status"] == "Ativo" else "dot-warn"
+            st.markdown(
+                f'<div class="robot-card" style="margin:.5rem 0"><div class="robot-name">'
+                f'<span class="dot {dot}"></span>{r["Robô"]}</div>'
+                f'<div class="robot-meta">{r["Status"]} • {r["Bateria"]}% • {r["Temperatura"]} °C • {r["Velocidade"]} m/s</div></div>',
+                unsafe_allow_html=True,
+            )
+        st.markdown('</div>', unsafe_allow_html=True)
+    ev = latest_event()
+    if not ev.empty:
+        r = ev.iloc[0]
+        st.write("")
         st.markdown(
-            """
-            **Aluno:** "Aqui está a parte de desenvolvimento."
-
-            1. Escolho um robô e um comando.
-            2. A interface representa a entrada do usuário.
-            3. O código exibido mostra como essa entrada vira lógica.
-            4. O comando é validado e processado.
-            5. O resultado é registrado no SQLite.
-            6. A telemetria e os dashboards refletem a operação.
-
-            O visitante não executa Python arbitrário. A interatividade
-            serve para visualizar a relação entre interface e código.
-            """
+            f'<div class="event"><div class="event-label">Última operação</div>'
+            f'<div class="event-main">{r["Robô"]} → {r["Comando"]}</div>'
+            f'<div class="event-sub">{r["Resultado"]} • {r["DataHora"]}</div></div>',
+            unsafe_allow_html=True,
         )
+    st.write("")
+    st.caption("Demonstração educacional: dados simulados, sem conexão com equipamentos industriais reais.")
 
-elif station.startswith("3"):
-    st.markdown('<div class="station"><h2>🗄️ Estação 3 — Banco de Dados e Logs</h2><p>Visão de Backend / DBA: dados persistidos em SQLite.</p></div>', unsafe_allow_html=True)
-    telemetry_df = get_telemetry(300)
-    c1,c2,c3 = st.columns(3)
-    c1.metric("Logs carregados",len(telemetry_df)); c2.metric("Temperatura média",f"{telemetry_df['Temperatura'].mean():.1f} °C" if not telemetry_df.empty else "0 °C"); c3.metric("Bateria média",f"{telemetry_df['Bateria'].mean():.1f}%" if not telemetry_df.empty else "0%")
-    st.subheader("Histórico de eventos")
-    limit = st.slider("Quantidade de registros",20,300,100,20)
-    telemetry_df = get_telemetry(limit)
-    st.dataframe(telemetry_df,use_container_width=True,hide_index=True)
-    chart_col1,chart_col2 = st.columns(2)
-    with chart_col1:
-        if not telemetry_df.empty:
-            fig = px.line(telemetry_df.sort_values("DataHora"),x="DataHora",y="Temperatura",color="Robô",title="Temperatura ao longo do tempo")
-            st.plotly_chart(fig,use_container_width=True)
-    with chart_col2:
-        if not telemetry_df.empty:
-            fig = px.line(telemetry_df.sort_values("DataHora"),x="DataHora",y="Bateria",color="Robô",title="Bateria ao longo do tempo")
-            st.plotly_chart(fig,use_container_width=True)
-    with st.expander("🔎 SQL utilizado na demonstração"):
-        st.code("""SELECT robot_name, battery, temperature, speed, status, created_at\nFROM telemetry\nORDER BY created_at DESC\nLIMIT 100;""",language="sql")
 
+init_database()
+
+params = st.query_params
+station = str(params.get("station", "4"))
+if station not in STATIONS:
+    station = "4"
+
+# A barra superior é propositalmente discreta: não explica a arquitetura ao visitante.
+refresh_state()
+
+if station == "1":
+    page_header("Controle da Produção", "Operação da linha • tarefas • manutenção")
+    station_production()
+elif station == "2":
+    station_robots()
+elif station == "3":
+    station_data()
 else:
-    st.markdown('<div class="station"><h2>📊 Estação 4 — Dashboard Executivo e Cliente</h2><p>Visão do cliente, gestor e equipe de implantação.</p></div>', unsafe_allow_html=True)
-    robots_df = get_robot_status()
-    total = len(robots_df); active = int((robots_df["Status"] == "Ativo").sum()); availability = active / total * 100 if total else 0
-    avg_battery = robots_df["Bateria"].mean(); avg_temp = robots_df["Temperatura"].mean()
-    c1,c2,c3,c4 = st.columns(4)
-    c1.metric("Disponibilidade",f"{availability:.1f}%"); c2.metric("Bateria média",f"{avg_battery:.1f}%"); c3.metric("Temperatura média",f"{avg_temp:.1f} °C"); c4.metric("Robôs monitorados",total)
-    col1,col2 = st.columns(2)
-    with col1:
-        fig = px.bar(robots_df,x="Robô",y="Bateria",color="Status",title="Bateria por robô",range_y=[0,100]); st.plotly_chart(fig,use_container_width=True)
-    with col2:
-        fig = px.bar(robots_df,x="Robô",y="Temperatura",color="Status",title="Temperatura por robô"); st.plotly_chart(fig,use_container_width=True)
-    st.subheader("Mapa operacional da fábrica")
-    map_df = robots_df.rename(columns={"X":"x","Y":"y","Robô":"robot"})
-    fig = px.scatter(map_df,x="x",y="y",color="Status",text="robot",size="Bateria",range_x=[0,10],range_y=[0,10],title="Posição simulada dos robôs")
-    fig.update_traces(textposition="top center"); fig.update_xaxes(title="Eixo X — célula industrial"); fig.update_yaxes(title="Eixo Y — célula industrial")
-    st.plotly_chart(fig,use_container_width=True)
-    st.subheader("📱 QR Code para acesso ao sistema")
-    qr_url = st.text_input("URL pública da aplicação",value="https://seu-projeto.streamlit.app",help="Depois do deploy, substitua pela URL real do sistema.")
-    if qr_url:
-        qr_bytes = create_qr_code(qr_url)
-        qr_col1,qr_col2 = st.columns([1,2])
-        with qr_col1:
-            st.image(qr_bytes,caption="Aponte a câmera do celular")
-            st.download_button("⬇️ Baixar QR Code",data=qr_bytes,file_name="qr_code_mundo_senai.png",mime="image/png")
-        with qr_col2:
-            st.markdown("### Experiência do visitante")
-            st.markdown("1. O visitante escaneia o QR Code.\n2. Abre o sistema no celular.\n3. Visualiza a frota simulada.\n4. A equipe explica a arquitetura.\n5. O aluno demonstra a integração entre requisitos, código, banco e dashboard.")
-    st.divider()
-    st.caption("Demonstração educacional — os dados dos robôs são simulados e não representam equipamentos industriais reais.")
+    station_dashboard()
