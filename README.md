@@ -33,20 +33,24 @@ mundo_senai_robotica/
 └── robotica_senai.db   # criado automaticamente na primeira execução
 ```
 
-## 3. Colocar no GitHub
+## 3. Fluxo das aulas: Fork do aluno
 
-Crie um repositório, por exemplo `mundo-senai-robotica`, e envie os três arquivos (`app.py`, `requirements.txt`, `README.md`).
+O repositório principal ficará na **conta do professor**. Os alunos não precisam criar o projeto do zero.
 
-Via Git:
+Cada aluno deverá:
 
-```bash
-git init
-git add .
-git commit -m "Sistema Mundo SENAI - Robótica"
-git branch -M main
-git remote add origin https://github.com/SEU-USUARIO/mundo-senai-robotica.git
-git push -u origin main
-```
+1. Abrir o repositório oficial do professor.
+2. Clicar em **Fork**.
+3. Criar o fork na própria conta do GitHub.
+4. Editar e testar o projeto no próprio fork.
+5. Fazer commits das atividades no próprio GitHub.
+6. Abrir um Codespace a partir do fork quando a aula pedir execução no navegador.
+
+Esse fluxo transforma o próprio GitHub em parte da atividade pedagógica: os alunos praticam Fork, edição, commits, organização de projeto e Codespaces.
+
+### Repositório da apresentação
+
+No dia do Mundo SENAI, os quatro monitores usarão o **repositório oficial do professor**, que será a versão preparada e testada para a feira.
 
 ## 4. Abrir no GitHub Codespaces
 

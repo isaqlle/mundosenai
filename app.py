@@ -258,33 +258,130 @@ if station.startswith("1"):
     st.dataframe(robots_df,use_container_width=True,hide_index=True)
 
 elif station.startswith("2"):
-    st.markdown('<div class="station"><h2>💻 Estação 2 — Código e Controle Operacional</h2><p>Visão do desenvolvedor/programador.</p></div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="station"><h2>💻 Estação 2 — Código e Controle Operacional</h2>'
+        '<p>Visão do desenvolvedor/programador — com demonstração interativa da lógica.</p></div>',
+        unsafe_allow_html=True,
+    )
+
     robots_df = get_robot_status()
-    left,right = st.columns([1,1.3])
+    left, right = st.columns([1, 1.35])
+
     with left:
-        st.subheader("Painel de comando")
-        selected_robot = st.selectbox("Robô",ROBOTS)
-        command = st.selectbox("Comando",["Mover","Parar","Calibrar","Recarregar","Diagnóstico"])
+        st.subheader("🎮 Controle do robô")
+        selected_robot = st.selectbox("Robô", ROBOTS)
+        command = st.selectbox(
+            "Comando",
+            ["Mover", "Parar", "Calibrar", "Recarregar", "Diagnóstico"],
+        )
+
         parameter = None
         if command == "Mover":
-            parameter = st.slider("Velocidade (m/s)",0.0,2.0,0.8,0.1)
-        if st.button("🚀 Enviar comando",type="primary",use_container_width=True):
-            result = send_command(selected_robot,command,parameter)
-            if result.startswith("OK"): st.success(result)
-            elif result.startswith("BLOQUEADO"): st.warning(result)
-            else: st.error(result)
+            parameter = st.slider(
+                "Velocidade (m/s)", 0.0, 2.0, 0.8, 0.1
+            )
+
+        if st.button(
+            "🚀 Enviar comando ao robô",
+            type="primary",
+            use_container_width=True,
+        ):
+            result = send_command(selected_robot, command, parameter)
+            if result.startswith("OK"):
+                st.success(result)
+            elif result.startswith("BLOQUEADO"):
+                st.warning(result)
+            else:
+                st.error(result)
+
         robot_row = robots_df[robots_df["Robô"] == selected_robot]
         if not robot_row.empty:
             row = robot_row.iloc[0]
-            a,b,c = st.columns(3)
-            a.metric("Bateria",f"{row['Bateria']}%"); b.metric("Temperatura",f"{row['Temperatura']} °C"); c.metric("Velocidade",f"{row['Velocidade']} m/s")
+            st.markdown("### Estado atual")
+            a, b, c = st.columns(3)
+            a.metric("Bateria", f"{row['Bateria']}%")
+            b.metric("Temperatura", f"{row['Temperatura']} °C")
+            c.metric("Velocidade", f"{row['Velocidade']} m/s")
+
+        st.info(
+            "💡 Escolha uma ação, envie o comando e observe a relação "
+            "entre interface, lógica, banco e telemetria."
+        )
+
     with right:
-        st.subheader("Snippet da lógica Python")
-        st.code('''def processar_comando(robo, comando, parametro=None):\n    if robo.status == "Manutenção":\n        return "BLOQUEADO"\n\n    if comando == "Mover":\n        robo.velocidade = parametro\n    elif comando == "Parar":\n        robo.velocidade = 0\n    elif comando == "Calibrar":\n        robo.posicao = (5, 5)\n    elif comando == "Recarregar":\n        robo.bateria = 100\n\n    salvar_log(robo, comando)\n    return "OK"''',language="python")
-        st.info("Em uma aplicação industrial real, esta camada poderia conversar com MQTT, REST, OPC-UA, ROS ou outro protocolo.")
-    st.subheader("Últimos comandos")
-    commands_df = read_dataframe("SELECT id AS ID,robot_name AS Robô,command AS Comando,parameter AS Parâmetro,result AS Resultado,created_at AS DataHora FROM commands ORDER BY id DESC LIMIT 15")
-    st.dataframe(commands_df,use_container_width=True,hide_index=True)
+        st.subheader("🧠 Código interativo")
+
+        parameter_code = (
+            f"parametro = {parameter:.1f}"
+            if parameter is not None
+            else "parametro = None"
+        )
+
+        generated_code = (
+            '# Entrada feita pelo aluno na interface\n'
+            f'robo = "{selected_robot}"\n'
+            f'comando = "{command}"\n'
+            f'{parameter_code}\n\n'
+            'def processar_comando(robo, comando, parametro=None):\n'
+            '    if robo.status == "Manutenção":\n'
+            '        return "BLOQUEADO"\n\n'
+            '    if comando == "Mover":\n'
+            '        robo.velocidade = parametro\n'
+            '    elif comando == "Parar":\n'
+            '        robo.velocidade = 0\n'
+            '    elif comando == "Calibrar":\n'
+            '        robo.posicao = (5, 5)\n'
+            '    elif comando == "Recarregar":\n'
+            '        robo.bateria = 100\n'
+            '    elif comando == "Diagnóstico":\n'
+            '        return consultar_diagnostico(robo)\n\n'
+            '    salvar_log(robo, comando)\n'
+            '    return "OK"\n'
+        )
+
+        st.code(generated_code, language="python")
+        st.caption(
+            "Altere o robô, o comando ou a velocidade no painel ao lado. "
+            "O trecho exibido acompanha as escolhas automaticamente."
+        )
+
+        st.markdown("### 🔍 Fluxo da execução")
+        flow = pd.DataFrame(
+            [
+                ["1", "Interface", f"{selected_robot} + {command}", "Entrada"],
+                ["2", "Validação", "Robô está disponível?", "Regra"],
+                ["3", "Controle", f"Executa {command}", "Processamento"],
+                ["4", "Persistência", "Grava no SQLite", "Log"],
+                ["5", "Dashboard", "Atualiza telemetria", "Saída"],
+            ],
+            columns=["Etapa", "Camada", "Ação", "Tipo"],
+        )
+        st.dataframe(flow, use_container_width=True, hide_index=True)
+
+    st.subheader("🧪 Últimos comandos executados")
+    commands_df = read_dataframe(
+        "SELECT id AS ID, robot_name AS Robô, command AS Comando, "
+        "parameter AS Parâmetro, result AS Resultado, created_at AS DataHora "
+        "FROM commands ORDER BY id DESC LIMIT 15"
+    )
+    st.dataframe(commands_df, use_container_width=True, hide_index=True)
+
+    with st.expander("🎓 Roteiro do aluno"):
+        st.markdown(
+            """
+            **Aluno:** "Aqui está a parte de desenvolvimento."
+
+            1. Escolho um robô e um comando.
+            2. A interface representa a entrada do usuário.
+            3. O código exibido mostra como essa entrada vira lógica.
+            4. O comando é validado e processado.
+            5. O resultado é registrado no SQLite.
+            6. A telemetria e os dashboards refletem a operação.
+
+            O visitante não executa Python arbitrário. A interatividade
+            serve para visualizar a relação entre interface e código.
+            """
+        )
 
 elif station.startswith("3"):
     st.markdown('<div class="station"><h2>🗄️ Estação 3 — Banco de Dados e Logs</h2><p>Visão de Backend / DBA: dados persistidos em SQLite.</p></div>', unsafe_allow_html=True)
